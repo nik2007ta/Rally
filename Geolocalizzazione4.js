@@ -552,7 +552,10 @@
     if (!lastPos) { updateHud({ state: 'wait' }); return; }
     const notes = window.raceNotes;
     const idx   = window.raceIdx;
-    if (!notes?.length) return;
+    if (!notes?.length) {
+      updateHud({ accuracy: lastPos.accuracy, speedMs: estimateSpeedMs(), state: 'wait' });
+      return;
+    }
 
     const tIdx = findNextNoteWithCoord(idx);
     if (tIdx == null) { updateHud({ state: 'done' }); return; }
