@@ -1,0 +1,2153 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  
+<meta charset="UTF-8">
+<!-- ═══ PWA — aggiungi queste righe nel <head> ═══ -->
+
+<!-- Manifest (rende l'app installabile) -->
+<link rel="manifest" href="./manifest.json">
+
+<!-- Tema colore per la barra del browser/status bar -->
+<meta name="theme-color" content="#e8c230">
+
+<!-- Apple-specific (per iOS) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RallyNav">
+<link rel="apple-touch-icon" href="icon-192.png">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rally Navigator — Riepilogo Percorso</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0c0f; --bg2:#111418; --bg3:#1a1f27; --border:#2a3040;
+  --accent:#e8c230; --accent2:#ff4d1a; --text:#e8eaf0; --muted:#6a7385;
+  --green:#2ecc71; --blue:#3b9eff; --red:#ff3b3b;
+  --panel-w: 360px;
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body { background:var(--bg); color:var(--text); font-family:'Barlow Condensed',sans-serif; display:flex; flex-direction:column; overflow:hidden; }
+
+/* ─── TOP BAR ─────────────────────────────────────────── */
+.topbar {
+  background:var(--bg2); border-bottom:2px solid var(--accent);
+  padding:10px 16px; display:flex; align-items:center; gap:12px;
+  flex-shrink:0; flex-wrap:wrap; z-index:100;
+}
+.logo { font-family:'Rajdhani',sans-serif; font-size:22px; font-weight:700; letter-spacing:3px; color:var(--accent); text-transform:uppercase; white-space:nowrap; }
+.logo span { color:var(--accent2); }
+.logo-sub { font-size:11px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; }
+.topbar-right { margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+/* Upload drop zone / button */
+.upload-area {
+  display:flex; align-items:center; gap:8px; background:var(--bg3);
+  border:1px dashed var(--border); border-radius:6px; padding:7px 14px;
+  cursor:pointer; transition:border-color .2s, background .2s;
+}
+.upload-area:hover, .upload-area.drag { border-color:var(--accent); background:#1c1f00; }
+.upload-area input { display:none; }
+.upload-label { font-size:13px; color:var(--muted); letter-spacing:.5px; cursor:pointer; white-space:nowrap; }
+.upload-area:hover .upload-label { color:var(--accent); }
+
+
+
+/* ─── MAIN LAYOUT ─────────────────────────────────────── */
+.main { display:flex; flex:1; overflow:hidden; position:relative; }
+
+/* ─── MAP ─────────────────────────────────────────────── */
+#map { flex:1; z-index:0; background:#0d1117; }
+.leaflet-container { background:#0d1117 !important; }
+.leaflet-tile { filter:brightness(.75) saturate(.65) hue-rotate(12deg); }
+.leaflet-control-zoom { border:1px solid var(--border) !important; }
+.leaflet-control-zoom a { background:var(--bg2)!important; color:var(--text)!important; border-bottom:1px solid var(--border)!important; }
+.leaflet-control-zoom a:hover { background:var(--bg3)!important; color:var(--accent)!important; }
+.leaflet-control-attribution { background:rgba(10,12,15,.7)!important; color:var(--muted)!important; font-size:10px; }
+.leaflet-popup-content-wrapper { background:var(--bg2); color:var(--text); border:1px solid var(--border); border-radius:6px; box-shadow:none; }
+.leaflet-popup-tip { background:var(--bg2); }
+.leaflet-popup-content { font-family:'Barlow Condensed',sans-serif; font-size:13px; line-height:1.6; }
+
+/* custom markers */
+.pin-marker { width:30px; height:30px; border-radius:50% 50% 50% 0; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; font-family:'Rajdhani',sans-serif; transform:rotate(-45deg); border:2px solid rgba(0,0,0,.5); }
+.pin-marker span { transform:rotate(45deg); }
+.pin-start { background:var(--green); color:#000; }
+.pin-end { background:var(--accent2); color:#fff; }
+.note-dot { width:20px; height:20px; border-radius:50%; background:var(--bg2); border:2px solid var(--accent); display:flex; align-items:center; justify-content:center; font-size:8px; font-family:'Share Tech Mono',monospace; color:var(--accent); font-weight:700; cursor:pointer; transition:all .15s; }
+.note-dot:hover, .note-dot.active { background:var(--accent); color:#000; transform:scale(1.35); }
+
+/* ─── SIDE PANEL ──────────────────────────────────────── */
+.panel {
+  width:var(--panel-w); background:var(--bg2);
+  border-left:2px solid var(--border);
+  display:flex; flex-direction:column; overflow:hidden; flex-shrink:0;
+  transition:transform .3s;
+}
+
+/* stats row */
+.stats-bar { display:grid; grid-template-columns:repeat(3,1fr); border-bottom:1px solid var(--border); flex-shrink:0; }
+.stat { padding:10px 8px; border-right:1px solid var(--border); text-align:center; }
+.stat:last-child { border-right:none; }
+.stat-label { font-size:9px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; }
+.stat-value { font-family:'Share Tech Mono',monospace; font-size:18px; color:var(--accent); margin-top:2px; line-height:1; }
+.stat-value.big { font-size:22px; }
+
+/* route header */
+.route-header { padding:10px 14px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.route-name { font-family:'Rajdhani',sans-serif; font-size:16px; font-weight:700; color:var(--text); letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.route-meta { display:flex; gap:8px; margin-top:4px; flex-wrap:wrap; }
+.badge { font-size:10px; letter-spacing:1.5px; text-transform:uppercase; padding:2px 7px; border-radius:3px; font-weight:700; font-family:'Rajdhani',sans-serif; }
+.badge-style { background:var(--bg3); color:var(--accent); border:1px solid #3a3200; }
+.badge-diff-easy { background:#1a3d1a; color:var(--green); }
+.badge-diff-medium { background:#3d2b00; color:var(--accent); }
+.badge-diff-hard { background:#3d0a00; color:var(--red); }
+.badge-ai { background:#0d1a2a; color:var(--blue); border:1px solid #1a3a5a; }
+.badge-car { background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+
+/* tabs */
+.tabs { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; }
+.tab { flex:1; padding:8px 4px; text-align:center; font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; transition:color .15s, border-color .15s; }
+.tab:hover { color:var(--text); }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+/* tab content */
+.tab-pane { display:none; flex:1; overflow-y:auto; }
+.tab-pane.active { display:flex; flex-direction:column; }
+.tab-pane::-webkit-scrollbar { width:4px; }
+.tab-pane::-webkit-scrollbar-track { background:var(--bg); }
+.tab-pane::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+/* ─── STATS TAB ───────────────────────────────────────── */
+.stats-section { padding:12px 14px; border-bottom:1px solid var(--border); }
+.section-title { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+.kv-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:13px; }
+.kv-key { color:var(--muted); }
+.kv-val { font-family:'Share Tech Mono',monospace; color:var(--text); text-align:right; }
+.kv-val.accent { color:var(--accent); }
+.kv-val.green { color:var(--green); }
+.kv-val.red { color:var(--red); }
+.kv-val.blue { color:var(--blue); }
+
+/* speed advisor */
+.spd-advisor { padding:12px 14px; border-bottom:1px solid var(--border); }
+.spd-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+.spd-bar-wrap { flex:1; height:6px; background:var(--bg); border-radius:3px; overflow:hidden; }
+.spd-bar-fill { height:100%; border-radius:3px; transition:width .6s; }
+.spd-val { font-family:'Share Tech Mono',monospace; font-size:12px; min-width:64px; text-align:right; }
+.spd-zones { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+.spz { font-size:10px; padding:2px 8px; border-radius:10px; letter-spacing:.5px; }
+.spz-safe { background:#0d2a0d; color:var(--green); }
+.spz-warn { background:#2a2200; color:var(--accent); }
+.spz-risk { background:#2a0a00; color:var(--red); }
+
+/* curvature / grade mini bars */
+.mini-bar-row { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+.mini-bar-label { font-size:11px; color:var(--muted); width:120px; flex-shrink:0; }
+.mini-bar-wrap { flex:1; height:4px; background:var(--bg); border-radius:2px; overflow:hidden; }
+.mini-bar-fill { height:100%; border-radius:2px; }
+.mini-bar-count { font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--text); min-width:28px; text-align:right; }
+
+/* gear distribution */
+.gear-bar-row { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.gear-label { font-family:'Share Tech Mono',monospace; font-size:12px; color:var(--accent); width:24px; }
+.gear-bar-wrap { flex:1; height:14px; background:var(--bg); border-radius:2px; overflow:hidden; }
+.gear-bar-fill { height:100%; border-radius:2px; background:var(--accent); opacity:.7; transition:width .5s; }
+.gear-pct { font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--muted); min-width:36px; text-align:right; }
+
+/* map links */
+.map-links { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; gap:6px; flex-wrap:wrap; }
+.map-link { font-size:11px; padding:4px 10px; border-radius:4px; border:1px solid var(--border); color:var(--muted); text-decoration:none; transition:border-color .15s, color .15s; }
+.map-link:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ─── NOTES TAB ───────────────────────────────────────── */
+.notes-toolbar { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; gap:6px; align-items:center; flex-shrink:0; }
+.filter-btn { font-size:11px; padding:3px 8px; border-radius:10px; border:1px solid var(--border); color:var(--muted); cursor:pointer; background:none; transition:all .15s; }
+.filter-btn:hover, .filter-btn.active { border-color:var(--accent); color:var(--accent); background:#1c1f00; }
+.notes-count-badge { margin-left:auto; font-size:11px; color:var(--muted); }
+
+.note-item {
+  display:flex; align-items:stretch; border-bottom:1px solid #1a1f27;
+  cursor:pointer; transition:background .12s;
+}
+.note-item:hover { background:#151a22; }
+.note-item.active { background:#1c2233; border-left:3px solid var(--accent); }
+
+.note-km {
+  width:52px; background:var(--bg3); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; padding:8px 4px; flex-shrink:0;
+}
+.note-km-val { font-family:'Share Tech Mono',monospace; font-size:12px; color:var(--accent); line-height:1; }
+.note-km-unit { font-size:8px; color:var(--muted); margin-top:1px; }
+
+.note-body { flex:1; padding:7px 10px; display:flex; flex-direction:column; gap:3px; min-width:0; }
+.note-main { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.note-turn { font-family:'Rajdhani',sans-serif; font-size:13px; font-weight:700; text-transform:uppercase; }
+.c-left { color:var(--blue); } .c-right { color:var(--accent2); } .c-str { color:var(--green); } .c-round { color:#cc44ff; }
+.ang-badge { font-size:10px; padding:1px 5px; border-radius:3px; font-weight:700; font-family:'Rajdhani',sans-serif; }
+.ang-1 { background:#0d2a0d; color:#2ecc71; } .ang-2 { background:#2a2200; color:#e8c230; } .ang-3 { background:#2a1200; color:#ff8c00; }
+.ang-4, .ang-5, .ang-6 { background:#2a0a00; color:#ff4d1a; }
+.note-speed { font-family:'Share Tech Mono',monospace; font-size:11px; background:var(--bg3); padding:1px 5px; border-radius:3px; }
+.note-gear { font-family:'Share Tech Mono',monospace; font-size:11px; padding:1px 5px; border:1px solid var(--border); border-radius:3px; font-weight:700; }
+.note-detail { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.note-note-text { font-size:11px; color:#8899bb; font-style:italic; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.note-flags { font-size:10px; color:#ff8c00; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ai-chip { font-size:9px; background:#0d1a2a; color:var(--blue); border:1px solid #1a3a5a; border-radius:3px; padding:1px 4px; font-family:'Share Tech Mono',monospace; }
+
+/* leg separator */
+.leg-sep { padding:4px 14px; background:#0d1520; border-bottom:1px solid #1a3a5a; border-top:1px solid #1a3a5a; display:flex; align-items:center; gap:8px; }
+.leg-sep-label { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--blue); }
+
+/* ─── EMPTY / LOADING STATE ───────────────────────────── */
+.drop-screen {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  flex-direction:column; gap:16px; z-index:50; background:rgba(10,12,15,.92);
+  transition:opacity .3s;
+}
+.drop-screen.hide { opacity:0; pointer-events:none; }
+.drop-icon { font-size:56px; }
+.drop-title { font-family:'Rajdhani',sans-serif; font-size:26px; font-weight:700; letter-spacing:3px; color:var(--accent); text-transform:uppercase; }
+.drop-sub { font-size:14px; color:var(--muted); text-align:center; line-height:1.8; max-width:400px; }
+.drop-sub b { color:var(--text); }
+.drop-hint { font-size:12px; color:var(--border); letter-spacing:1px; margin-top:4px; }
+
+.loading-overlay {
+  display:none; position:absolute; inset:0; background:rgba(10,12,15,.85);
+  z-index:9999; align-items:center; justify-content:center; flex-direction:column; gap:16px;
+}
+.loading-overlay.show { display:flex; }
+.spinner { width:44px; height:44px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.loading-text { font-family:'Rajdhani',sans-serif; font-size:15px; letter-spacing:3px; text-transform:uppercase; color:var(--accent); }
+
+/* ─── MOBILE PANEL TOGGLE ─────────────────────────────── */
+.panel-toggle {
+  display:none; position:fixed; bottom:20px; right:20px; z-index:500;
+  width:50px; height:50px; border-radius:50%; background:var(--accent); color:#000;
+  border:none; font-size:22px; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,.5);
+  align-items:center; justify-content:center; transition:transform .15s;
+}
+.panel-toggle:active { transform:scale(.93); }
+
+/* ─── RESPONSIVE ──────────────────────────────────────── */
+@media (max-width: 900px) {
+  :root { --panel-w: 100%; }
+  .main { flex-direction:column; }
+  #map { flex:none; height:45vh; min-height:220px; }
+  .panel { width:100%; border-left:none; border-top:2px solid var(--border); flex:1; }
+}
+
+@media (max-width: 600px) {
+  .topbar { padding:8px 10px; gap:8px; }
+  .logo { font-size:18px; }
+  .logo-sub { display:none; }
+  .topbar-right { gap:6px; }
+  .upload-area { padding:6px 10px; }
+  #map { height:38vh; }
+  .stats-bar { grid-template-columns:repeat(3,1fr); }
+  .stat-value { font-size:16px; }
+  .stat-value.big { font-size:18px; }
+}
+
+
+/* ─── RACE MODE BUTTON ──────────────────────────────────── */
+.btn-race {
+  background:#1a0800; border:2px solid var(--accent2); color:var(--accent2);
+  font-family:'Rajdhani',sans-serif; font-weight:700; font-size:14px;
+  letter-spacing:2px; padding:7px 16px; border-radius:4px; cursor:pointer;
+  text-transform:uppercase; transition:all .15s; white-space:nowrap;
+  animation: raceGlow 2s ease-in-out infinite;
+}
+.btn-race:hover { background:var(--accent2); color:#000; }
+@keyframes raceGlow {
+  0%,100% { box-shadow: 0 0 6px rgba(255,77,26,.3); }
+  50%      { box-shadow: 0 0 18px rgba(255,77,26,.7); }
+}
+
+/* ─── RACE MODE OVERLAY ─────────────────────────────────── */
+#raceOverlay {
+  display:none; position:fixed; inset:0; z-index:50000;
+  background:var(--bg); flex-direction:column;
+  font-family:'Barlow Condensed',sans-serif;
+}
+#raceOverlay.active { display:flex; }
+
+.race-topbar {
+  background:var(--bg2); border-bottom:2px solid var(--accent2);
+  padding:8px 16px; display:flex; align-items:center; gap:12px; flex-shrink:0;
+}
+.race-logo { font-family:'Rajdhani',sans-serif; font-size:18px; font-weight:700; letter-spacing:3px; color:var(--accent2); text-transform:uppercase; }
+.race-progress-wrap { flex:1; height:5px; background:var(--bg3); border-radius:3px; overflow:hidden; }
+.race-progress-fill { height:100%; background:var(--accent2); border-radius:3px; transition:width .35s; }
+.race-counter { font-family:'Share Tech Mono',monospace; font-size:13px; color:var(--muted); white-space:nowrap; }
+.race-close {
+  background:none; border:1px solid var(--border); color:var(--muted);
+  font-size:13px; padding:5px 12px; border-radius:4px; cursor:pointer;
+  font-family:'Barlow Condensed',sans-serif; letter-spacing:1px; transition:all .15s;
+}
+.race-close:hover { border-color:var(--accent2); color:var(--accent2); }
+
+.race-body { flex:1; display:flex; flex-direction:column; overflow:hidden; min-height:0; }
+
+.race-current {
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; padding:20px 16px; position:relative;
+  user-select:none; min-height:0; overflow:hidden;
+}
+.race-km-badge {
+  font-family:'Share Tech Mono',monospace; font-size:12px; color:var(--muted);
+  letter-spacing:2px; margin-bottom:10px; text-transform:uppercase;
+}
+.race-arrow-icon {
+  font-size:clamp(56px, 14vw, 100px); line-height:1; margin-bottom:6px;
+  filter: drop-shadow(0 0 24px rgba(232,194,48,.5));
+  transition: transform .12s;
+}
+.race-direction {
+  font-family:'Rajdhani',sans-serif;
+  font-size:clamp(26px, 6.5vw, 52px);
+  font-weight:900; letter-spacing:3px; text-transform:uppercase;
+  text-align:center; line-height:1.1; margin-bottom:12px;
+}
+.race-angle-row { display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap; justify-content:center; }
+.race-ang-badge { font-size:clamp(13px,2.5vw,18px); padding:3px 12px; border-radius:4px; font-weight:700; font-family:'Rajdhani',sans-serif; letter-spacing:2px; }
+.race-speed { font-family:'Share Tech Mono',monospace; font-size:clamp(40px, 10vw, 78px); font-weight:700; line-height:1; }
+.race-speed-unit { font-size:clamp(14px,2.5vw,20px); color:var(--muted); margin-left:4px; }
+.race-gear-row { display:flex; align-items:center; gap:14px; margin-top:10px; }
+.race-gear {
+  font-family:'Share Tech Mono',monospace; font-size:clamp(24px,5vw,42px);
+  font-weight:700; padding:5px 18px; border:2px solid var(--border); border-radius:6px; color:var(--text);
+}
+.race-rpm { font-family:'Share Tech Mono',monospace; font-size:clamp(12px,2vw,16px); color:var(--muted); }
+.race-flags { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:12px; }
+.race-flag { font-size:clamp(11px,1.8vw,13px); padding:3px 10px; border-radius:20px; background:var(--bg3); border:1px solid var(--border); color:var(--text); }
+.race-flag.chicane { background:#0d1a2a; border-color:var(--blue); color:var(--blue); }
+.race-flag.brake   { background:#2a0a00; border-color:var(--accent2); color:var(--accent2); }
+.race-flag.uphill  { background:#0d2a0d; border-color:var(--green); color:var(--green); }
+.race-flag.downhill{ background:#1a0d2a; border-color:#cc44ff; color:#cc44ff; }
+.race-note-text { font-size:clamp(12px,1.8vw,15px); color:#8899bb; font-style:italic; text-align:center; margin-top:10px; max-width:560px; line-height:1.5; }
+
+.race-tap-left, .race-tap-right {
+  position:absolute; top:0; bottom:0; width:35%;
+  display:flex; align-items:center; opacity:0; transition:opacity .15s; cursor:pointer;
+}
+.race-tap-left { left:0; justify-content:flex-start; padding-left:10px; }
+.race-tap-right { right:0; justify-content:flex-end; padding-right:10px; }
+.race-tap-left:hover, .race-tap-right:hover { opacity:.45; }
+.race-tap-arrow { font-size:28px; color:var(--muted); }
+
+.race-next {
+  background:var(--bg2); border-top:2px solid var(--border);
+  padding:10px 18px; display:flex; align-items:center; gap:12px;
+  flex-shrink:0; cursor:pointer; transition:background .15s;
+}
+.race-next:hover { background:var(--bg3); }
+.race-next-label { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.race-next-dir { font-family:'Rajdhani',sans-serif; font-size:clamp(15px,3vw,22px); font-weight:700; text-transform:uppercase; flex:1; }
+.race-next-icon { font-size:clamp(18px,4vw,28px); }
+.race-next-spd { font-family:'Share Tech Mono',monospace; font-size:clamp(13px,2vw,16px); color:var(--muted); white-space:nowrap; }
+.race-next-gear { font-family:'Share Tech Mono',monospace; font-size:12px; padding:2px 7px; border:1px solid var(--border); border-radius:3px; color:var(--text); white-space:nowrap; }
+
+.race-nav { background:var(--bg2); border-top:1px solid var(--border); display:flex; flex-shrink:0; }
+.race-nav-btn {
+  flex:1; background:none; border:none; color:var(--muted);
+  font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700;
+  letter-spacing:2px; padding:11px; cursor:pointer; text-transform:uppercase;
+  transition:background .15s, color .15s; display:flex; align-items:center; justify-content:center; gap:6px;
+}
+.race-nav-btn:hover { background:var(--bg3); color:var(--text); }
+.race-nav-btn:disabled { opacity:.2; cursor:not-allowed; }
+.race-nav-btn.prev:hover { color:var(--blue); }
+.race-nav-btn.next:hover { color:var(--accent); }
+.race-nav-sep { width:1px; background:var(--border); flex-shrink:0; }
+
+.speed-safe { color:var(--green); }
+.speed-warn { color:var(--accent); }
+.speed-risk { color:var(--red); }
+
+.race-kbd-hint { position:absolute; bottom:6px; right:10px; font-size:10px; color:var(--border); letter-spacing:1px; pointer-events:none; }
+
+/* ─── VOICE COPILOT ──────────────────────────────────────── */
+.voice-btn {
+  display:flex; align-items:center; gap:7px;
+  background:var(--bg3); border:2px solid var(--border);
+  border-radius:6px; padding:6px 12px; cursor:pointer;
+  font-family:'Rajdhani',sans-serif; font-size:13px; font-weight:700;
+  letter-spacing:1.5px; text-transform:uppercase; color:var(--muted);
+  transition:all .2s; white-space:nowrap;
+}
+.voice-btn:hover { border-color:var(--blue); color:var(--blue); }
+.voice-btn.active {
+  background:#0a1a2a; border-color:var(--blue); color:var(--blue);
+  box-shadow:0 0 12px rgba(59,158,255,.35);
+  animation:voiceGlow 1.8s ease-in-out infinite;
+}
+@keyframes voiceGlow {
+  0%,100% { box-shadow:0 0 6px rgba(59,158,255,.25); }
+  50%      { box-shadow:0 0 18px rgba(59,158,255,.6); }
+}
+.voice-btn .voice-icon { font-size:15px; line-height:1; }
+.voice-status-dot {
+  width:8px; height:8px; border-radius:50%;
+  background:var(--border); flex-shrink:0; transition:background .2s;
+}
+.voice-btn.active .voice-status-dot {
+  background:var(--blue);
+  animation:voicePulse 1s ease-in-out infinite;
+}
+@keyframes voicePulse {
+  0%,100% { opacity:1; } 50% { opacity:.35; }
+}
+
+/* speaking wave (shown while TTS is playing) */
+.voice-speaking-indicator {
+  position:absolute; top:8px; left:50%; transform:translateX(-50%);
+  display:none; align-items:center; gap:3px; pointer-events:none;
+}
+.voice-speaking-indicator.visible { display:flex; }
+.voice-wave-bar {
+  width:3px; border-radius:2px; background:var(--blue);
+  animation:waveBar .7s ease-in-out infinite;
+}
+.voice-wave-bar:nth-child(1){ height:8px; animation-delay:0s; }
+.voice-wave-bar:nth-child(2){ height:14px; animation-delay:.1s; }
+.voice-wave-bar:nth-child(3){ height:18px; animation-delay:.2s; }
+.voice-wave-bar:nth-child(4){ height:14px; animation-delay:.3s; }
+.voice-wave-bar:nth-child(5){ height:8px; animation-delay:.4s; }
+@keyframes waveBar {
+  0%,100% { transform:scaleY(.4); opacity:.5; }
+  50%      { transform:scaleY(1);  opacity:1;  }
+}
+
+/* toast notification for voice status */
+.voice-toast {
+  position:fixed; bottom:100px; left:50%; transform:translateX(-50%) translateY(20px);
+  background:var(--bg2); border:1px solid var(--blue); border-radius:8px;
+  padding:8px 18px; font-family:'Rajdhani',sans-serif; font-size:14px;
+  letter-spacing:1px; color:var(--blue); z-index:99999;
+  opacity:0; transition:opacity .3s, transform .3s; pointer-events:none;
+  white-space:nowrap;
+}
+.voice-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+.voice-toast.off { border-color:var(--muted); color:var(--muted); }
+
+/* ─── API KEY MODAL ───────────────────────────────────────── */
+.apikey-modal {
+  display:none; position:fixed; inset:0; z-index:200000;
+  background:rgba(10,12,15,.88); align-items:center; justify-content:center;
+}
+.apikey-modal.show { display:flex; }
+.apikey-box {
+  background:var(--bg2); border:2px solid var(--blue); border-radius:10px;
+  padding:26px 28px; max-width:400px; width:90%; box-shadow:0 12px 48px rgba(0,0,0,.7);
+  animation:popIn .18s ease-out;
+}
+.apikey-title {
+  font-family:'Rajdhani',sans-serif; font-size:19px; font-weight:700;
+  color:var(--blue); letter-spacing:2px; text-transform:uppercase; margin-bottom:6px;
+}
+.apikey-desc {
+  font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:16px;
+}
+.apikey-desc a { color:var(--blue); text-decoration:underline; }
+.apikey-desc b { color:var(--text); }
+.apikey-input {
+  width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:5px;
+  color:var(--text); font-family:'Share Tech Mono',monospace; font-size:13px;
+  padding:9px 12px; outline:none; transition:border-color .2s; margin-bottom:14px;
+}
+.apikey-input:focus { border-color:var(--blue); }
+.apikey-input::placeholder { color:var(--muted); }
+.apikey-row { display:flex; gap:8px; justify-content:flex-end; }
+.apikey-btn {
+  font-family:'Rajdhani',sans-serif; font-size:14px; font-weight:700;
+  letter-spacing:1.5px; text-transform:uppercase; padding:8px 18px;
+  border-radius:5px; cursor:pointer; border:none; transition:all .15s;
+}
+.apikey-btn-cancel { background:var(--bg3); color:var(--muted); border:1px solid var(--border); }
+.apikey-btn-cancel:hover { color:var(--text); border-color:var(--text); }
+.apikey-btn-save { background:var(--blue); color:#fff; }
+.apikey-btn-save:hover { background:#5aadff; }
+.apikey-note { font-size:11px; color:var(--muted); margin-top:10px; line-height:1.5; }
+.apikey-note b { color:var(--accent); }
+.apikey-section-label {
+  font-size:10px; letter-spacing:2px; text-transform:uppercase;
+  color:var(--muted); margin-bottom:6px; font-family:'Rajdhani',sans-serif; font-weight:700;
+}
+.apikey-select {
+  width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:5px;
+  color:var(--text); font-family:'Barlow Condensed',sans-serif; font-size:13px;
+  padding:8px 10px; outline:none; transition:border-color .2s; margin-bottom:4px;
+  cursor:pointer;
+}
+.apikey-select:focus { border-color:var(--blue); }
+
+/* settings gear button next to voice btn */
+.voice-settings-btn {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:6px; padding:6px 9px; cursor:pointer;
+  font-size:15px; line-height:1; transition:border-color .15s, background .15s;
+  flex-shrink:0;
+}
+.voice-settings-btn:hover { border-color:var(--blue); background:#0a1a2a; }
+
+/* ─── NOTE DETAIL POPUP ───────────────────────────────── */
+.note-detail-popup {
+  position:fixed; z-index:10000; background:var(--bg2); border:1px solid var(--accent);
+  border-radius:8px; padding:14px 16px; max-width:320px; min-width:220px;
+  box-shadow:0 8px 32px rgba(0,0,0,.7); pointer-events:auto;
+  animation:popIn .15s ease-out;
+}
+@keyframes popIn { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:scale(1); } }
+.ndp-close { position:absolute; top:8px; right:10px; background:none; border:none; color:var(--muted); font-size:16px; cursor:pointer; }
+.ndp-close:hover { color:var(--text); }
+.ndp-title { font-family:'Rajdhani',sans-serif; font-size:15px; font-weight:700; color:var(--accent); letter-spacing:1px; margin-bottom:8px; padding-right:20px; }
+.ndp-row { display:flex; justify-content:space-between; gap:12px; margin-bottom:4px; font-size:12px; }
+.ndp-key { color:var(--muted); }
+.ndp-val { font-family:'Share Tech Mono',monospace; color:var(--text); text-align:right; }
+.ndp-note { font-size:11px; color:#8899bb; font-style:italic; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); line-height:1.5; }
+.ndp-links { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+.ndp-link { font-size:10px; padding:3px 8px; border-radius:3px; border:1px solid var(--border); color:var(--muted); text-decoration:none; transition:all .15s; }
+.ndp-link:hover { border-color:var(--accent); color:var(--accent); }
+
+/* race badge variants */
+.race-ang-badge-muted { background:var(--bg3); color:var(--muted); border:1px solid var(--border); }
+.race-ang-badge-sm { font-size:11px; }
+.race-flag-nextgear { background:#1a0d00; border-color:var(--accent); color:var(--accent); }
+/* layout utility */
+.hidden { display:none !important; }
+/* off-tab rendering hint */
+.tab-pane:not(.active) { content-visibility:auto; contain-intrinsic-size:0 400px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div>
+    <div class="logo">Rally<span>NAV</span></div>
+    <div class="logo-sub">Riepilogo Percorso</div>
+  </div>
+  <div class="topbar-right">
+    <label class="upload-area" id="uploadArea">
+      <span>📂</span>
+      <span class="upload-label">Carica JSON / GPX</span>
+      <input type="file" id="fileInput" accept=".json,.gpx" multiple>
+    </label>
+    <button class="btn-race" id="raceModeBtn" onclick="enterRaceMode()" style="display:none">🏁 CORSA</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <div id="map"></div>
+
+  <!-- SIDE PANEL -->
+  <div class="panel" id="panel">
+
+    <div class="stats-bar" id="statsBar">
+      <div class="stat">
+        <div class="stat-label">Distanza</div>
+        <div class="stat-value big" id="statDist">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Tempo</div>
+        <div class="stat-value" id="statTime">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Note</div>
+        <div class="stat-value" id="statNotes">—</div>
+      </div>
+    </div>
+
+    <!-- Route header -->
+    <div class="route-header hidden" id="routeHeader">
+      <div class="route-name" id="routeName">—</div>
+      <div class="route-meta" id="routeMeta"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs hidden" id="tabsBar">
+      <div class="tab active" data-tab="notes" onclick="switchTab('notes')">📋 Note</div>
+      <div class="tab" data-tab="stats" onclick="switchTab('stats')">📊 Statistiche</div>
+      <div class="tab" data-tab="vehicle" onclick="switchTab('vehicle')">🚗 Veicolo</div>
+    </div>
+
+    <!-- NOTES TAB -->
+    <div class="tab-pane active" id="tab-notes">
+      <div class="notes-toolbar hidden" id="notesToolbar">
+        <button class="filter-btn active" data-filter="all" onclick="applyFilter('all')">Tutte</button>
+        <button class="filter-btn" data-filter="turns" onclick="applyFilter('turns')">Curve</button>
+        <button class="filter-btn" data-filter="chicane" onclick="applyFilter('chicane')">Chicane</button>
+        <button class="filter-btn" data-filter="risk" onclick="applyFilter('risk')">⚠ Rischio</button>
+        <span class="notes-count-badge" id="notesCountBadge"></span>
+      </div>
+      <div id="notesList">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center;">
+          <div style="font-size:48px;opacity:.2">🏁</div>
+          <div style="font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;letter-spacing:2px;color:var(--muted)">Nessun percorso caricato</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.7;">Carica un file <b>.json</b> esportato da Rally Navigator<br>oppure trascina qui il file.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATS TAB -->
+    <div class="tab-pane" id="tab-stats">
+      <div id="statsContent"></div>
+    </div>
+
+    <!-- VEHICLE TAB -->
+    <div class="tab-pane" id="tab-vehicle">
+      <div id="vehicleContent"></div>
+    </div>
+
+  </div><!-- /panel -->
+
+  <!-- Drop screen overlay (map area) -->
+  <div class="drop-screen" id="dropScreen">
+    <div class="drop-icon">🗺️</div>
+    <div class="drop-title">Riepilogo Percorso</div>
+    <div class="drop-sub">Carica l'esportazione <b>.json</b> generata da Rally Navigator per visualizzare il riepilogo completo con mappa, note di passo e statistiche.</div>
+    <div class="drop-hint">⬆ usa il pulsante in alto · oppure trascina il file qui</div>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Caricamento...</div>
+  </div>
+</div>
+
+<!-- Note detail popup -->
+<div class="note-detail-popup" id="notePopup" style="display:none">
+  <button class="ndp-close" onclick="closeNotePopup()">✕</button>
+  <div class="ndp-title" id="ndpTitle">—</div>
+  <div id="ndpBody"></div>
+</div>
+
+<!-- RACE MODE OVERLAY -->
+<div id="raceOverlay">
+  <div class="race-topbar">
+    <div class="race-logo">🏁 CORSA</div>
+    <div class="race-progress-wrap">
+      <div class="race-progress-fill" id="raceProgressFill" style="width:0%"></div>
+    </div>
+    <div class="race-counter" id="raceCounter">1 / —</div>
+    <button class="voice-btn" id="voiceCopilotBtn" title="Attiva/disattiva il copilota vocale WaveNet">
+      <span class="voice-icon">🎙️</span>
+      <span class="voice-status-dot"></span>
+      <span id="voiceBtnLabel">VOCE OFF</span>
+    </button>
+    <button class="voice-settings-btn" onclick="openApikeyModal()" title="Impostazioni voce">⚙️</button>
+    <button class="race-close" onclick="exitRaceMode()">✕ ESC</button>
+  </div>
+
+  <div class="race-body">
+    <!-- Current note -->
+    <div class="race-current" id="raceCurrent">
+      <!-- Voice speaking wave indicator -->
+      <div class="voice-speaking-indicator" id="voiceSpeakingWave">
+        <div class="voice-wave-bar"></div>
+        <div class="voice-wave-bar"></div>
+        <div class="voice-wave-bar"></div>
+        <div class="voice-wave-bar"></div>
+        <div class="voice-wave-bar"></div>
+      </div>
+      <div class="race-km-badge" id="raceKm">0.00 km</div>
+      <div class="race-arrow-icon" id="raceArrowIcon">⬆</div>
+      <div class="race-direction" id="raceDirection">—</div>
+      <div class="race-angle-row" id="raceAngleRow"></div>
+      <div class="race-gear-row">
+        <div class="race-speed" id="raceSpeed">—<span class="race-speed-unit">km/h</span></div>
+        <div class="race-gear" id="raceGear">M—</div>
+        <div class="race-rpm" id="raceRpm"></div>
+      </div>
+      <div class="race-flags" id="raceFlags"></div>
+      <div class="race-note-text" id="raceNoteText"></div>
+      <!-- tap zones -->
+      <div class="race-tap-left" onclick="racePrev()"><span class="race-tap-arrow">‹</span></div>
+      <div class="race-tap-right" onclick="raceNext()"><span class="race-tap-arrow">›</span></div>
+      <div class="race-kbd-hint">← → tasti freccia · Spazio: avanti</div>
+    </div>
+
+    <!-- Next note preview -->
+    <div class="race-next" id="raceNextBar" onclick="raceNext()">
+      <span class="race-next-label">Prossima</span>
+      <span class="race-next-icon" id="raceNextIcon">—</span>
+      <span class="race-next-dir" id="raceNextDir">—</span>
+      <span class="race-next-spd" id="raceNextSpd"></span>
+      <span class="race-next-gear" id="raceNextGear"></span>
+    </div>
+
+    <!-- Nav buttons -->
+    <div class="race-nav">
+      <button class="race-nav-btn prev" id="racePrevBtn" onclick="racePrev()">‹ PRECEDENTE</button>
+      <div class="race-nav-sep"></div>
+      <button class="race-nav-btn next" id="raceNextBtn" onclick="raceNext()">SUCCESSIVA ›</button>
+    </div>
+  </div>
+</div>
+
+<!-- IMPOSTAZIONI WAVENET TTS -->
+<div class="apikey-modal" id="apikeyModal">
+  <div class="apikey-box">
+    <div class="apikey-title">⚙️ Impostazioni Copilota Vocale</div>
+
+    <!-- API KEY -->
+    <div class="apikey-section-label">🔑 Google Cloud API Key</div>
+    <div class="apikey-desc">
+      Chiave su <a href="https://console.cloud.google.com/apis/credentials" target="_blank">console.cloud.google.com</a>
+      → abilita <b>Cloud Text-to-Speech API</b> → <b>Create credentials → API Key</b>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:4px">
+      <input class="apikey-input" id="apikeyInput" type="password"
+             placeholder="AIza..." autocomplete="off" spellcheck="false" style="margin-bottom:0;flex:1">
+      <button class="apikey-btn apikey-btn-cancel" id="apikeyShowBtn"
+              onclick="toggleShowKey()" style="padding:8px 10px;font-size:16px">👁</button>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer">
+        <input type="checkbox" id="apikeyRemember" style="accent-color:var(--blue)">
+        Ricorda nel browser (localStorage)
+      </label>
+    </div>
+
+    <!-- VOCE -->
+    <div class="apikey-section-label">🎙️ Voce WaveNet</div>
+    <select class="apikey-select" id="voiceSelect">
+      <option value="it-IT-Wavenet-D">it-IT-Wavenet-D — maschile, profondo ✦ consigliato</option>
+      <option value="it-IT-Wavenet-C">it-IT-Wavenet-C — maschile, chiaro</option>
+      <option value="it-IT-Wavenet-A">it-IT-Wavenet-A — femminile, chiara</option>
+      <option value="it-IT-Wavenet-B">it-IT-Wavenet-B — femminile, morbida</option>
+      <option value="it-IT-Standard-D">it-IT-Standard-D — maschile (Standard)</option>
+      <option value="it-IT-Standard-C">it-IT-Standard-C — maschile (Standard)</option>
+    </select>
+
+    <!-- VELOCITÀ -->
+    <div class="apikey-section-label" style="margin-top:14px">⚡ Velocità lettura</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <input type="range" id="voiceSpeedRange" min="0.8" max="2.0" step="0.05" value="1.35"
+             style="flex:1;accent-color:var(--blue)">
+      <span id="voiceSpeedLabel" style="font-family:'Share Tech Mono',monospace;font-size:13px;
+            color:var(--accent);min-width:36px;text-align:right">1.35×</span>
+    </div>
+
+    <!-- AZIONI -->
+    <div class="apikey-row">
+      <button class="apikey-btn apikey-btn-cancel" onclick="deleteApiKey()">🗑 Cancella chiave</button>
+      <button class="apikey-btn apikey-btn-cancel" onclick="closeApikeyModal()">Annulla</button>
+      <button class="apikey-btn apikey-btn-save" onclick="saveApiKey()">✓ Salva</button>
+    </div>
+    <div class="apikey-note">
+      🔒 La chiave viene usata <b>solo dal tuo browser</b> per chiamare l'API Google — mai inviata altrove.
+    </div>
+  </div>
+</div>
+
+<div class="voice-toast" id="voiceToast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let routeData = null;
+let map = null;
+let routeLayer = null;
+let noteMarkers = [];
+let startMarker = null;
+let endMarker = null;
+let currentFilter = 'all';
+let activeNoteIdx = null;
+
+// ═══════════════════════════════════════════════════════════
+// VOICE COPILOT STATE
+// ═══════════════════════════════════════════════════════════
+let voiceCopilotEnabled = false;
+let voiceSynth = window.speechSynthesis || null;
+let voiceCurrentUtterance = null;
+
+// ═══════════════════════════════════════════════════════════
+// MAP INIT
+// ═══════════════════════════════════════════════════════════
+function initMap() {
+  map = L.map('map', { zoomControl:true, attributionControl:true })
+    .setView([41.9, 12.5], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'© OpenStreetMap contributors', maxZoom:19
+  }).addTo(map);
+}
+
+// ═══════════════════════════════════════════════════════════
+// DRAG & DROP
+// ═══════════════════════════════════════════════════════════
+function initDragDrop() {
+  const body = document.body;
+  body.addEventListener('dragover', e => { e.preventDefault(); document.getElementById('uploadArea').classList.add('drag'); });
+  body.addEventListener('dragleave', () => document.getElementById('uploadArea').classList.remove('drag'));
+  body.addEventListener('drop', e => {
+    e.preventDefault();
+    document.getElementById('uploadArea').classList.remove('drag');
+    const files = e.dataTransfer.files;
+    if (files.length) handleFile(files[0]);
+  });
+  document.getElementById('fileInput').addEventListener('change', e => {
+    if (e.target.files.length) handleFile(e.target.files[0]);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// FILE HANDLING
+// ═══════════════════════════════════════════════════════════
+function normalizeRallyJSON(raw) {
+  // Handle both the full export format and any partial format
+  const data = { ...raw };
+
+  // Normalize notes: Rally Navigator exports coord as {lon, lat} object,
+  // but direction comes from turn.dir, and various field names differ
+  if (Array.isArray(data.notes)) {
+    data.notes = data.notes.map((n, i) => {
+      const norm = { ...n, index: i };
+
+      // direction: may be in turn.dir or direction
+      if (!norm.direction && n.turn?.dir) norm.direction = n.turn.dir;
+      if (!norm.direction_cls && n.turn?.cls) norm.direction_cls = n.turn.cls;
+      if (!norm.turn_angle && n.turn?.angle) norm.turn_angle = n.turn.angle;
+
+      // coord: may be {lon,lat} or [lon,lat] array
+      if (!norm.coord && n.coord) {
+        if (Array.isArray(n.coord)) {
+          norm.coord = { lon: n.coord[0], lat: n.coord[1] };
+        } else {
+          norm.coord = n.coord; // already {lon, lat}
+        }
+      }
+
+      // speed_kmh alias
+      if (norm.speed_kmh == null && n.speed != null) norm.speed_kmh = n.speed;
+
+      // road_type_label alias
+      if (!norm.road_type_label && n.roadType) {
+        const LABELS = { motorway:'Autostrada', trunk:'Superstrada', regional:'Statale', secondary:'Provinciale', residential:'Residenziale', urban:'Urbano', urban_tight:'Centro', mountain:'Montana' };
+        norm.road_type_label = LABELS[n.roadType] || n.roadType;
+        norm.road_type = n.roadType;
+      }
+
+      // Other field aliases
+      if (norm.radius_m == null && n.radius != null) norm.radius_m = n.radius;
+      if (norm.grade_pct == null && n.grade != null) norm.grade_pct = n.grade;
+      if (norm.brake_dist_m == null && n.brakeDist != null) norm.brake_dist_m = n.brakeDist;
+      if (norm.is_chicane == null && n.isChicane != null) norm.is_chicane = n.isChicane;
+      if (!norm.note && n.styleNote) norm.note = n.styleNote;
+      if (norm.distance_m == null && n.distFull != null) norm.distance_m = n.distFull;
+      if (!norm.radius_label && n.radiusLabel) norm.radius_label = n.radiusLabel;
+      if (!norm.grade_label && n.gradeLabel) norm.grade_label = n.gradeLabel;
+      if (norm.ai_speed == null && n.aiPowered != null) norm.ai_speed = n.aiPowered;
+      if (norm.ai_gear == null && n.aiGearPowered != null) norm.ai_gear = n.aiGearPowered;
+
+      return norm;
+    });
+  }
+
+  // Normalize vehicle fields
+  if (data.vehicle) {
+    const v = data.vehicle;
+    if (v.vmax_kmh == null && v.vmax != null) v.vmax_kmh = v.vmax;
+    if (v.rpm_max == null && v.rpmMax != null) v.rpm_max = v.rpmMax;
+    if (v.rpm_shift == null && v.rpmShift != null) v.rpm_shift = v.rpmShift;
+  }
+
+  // Normalize statistics speed field
+  if (data.statistics?.speed) {
+    const sp = data.statistics.speed;
+    if (sp.avg == null && sp.average != null) sp.avg = sp.average;
+  }
+
+  return data;
+}
+
+function handleFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'json') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const raw = JSON.parse(e.target.result);
+        const data = normalizeRallyJSON(raw);
+        loadRoute(data);
+      } catch(err) {
+        alert('Errore nel parsing JSON: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  } else if (ext === 'gpx') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const data = parseGPX(e.target.result);
+      if (data) loadRoute(data);
+      else alert('Impossibile leggere il file GPX.');
+    };
+    reader.readAsText(file);
+  } else {
+    alert('Formato non supportato. Usa .json (esportazione Rally Navigator) o .gpx.');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GPX PARSER (minimal)
+// ═══════════════════════════════════════════════════════════
+function parseGPX(xmlStr) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlStr, 'application/xml');
+  const metaName = doc.querySelector('metadata > name');
+  const trackName = doc.querySelector('trk > name');
+  const name = metaName?.textContent || trackName?.textContent || 'Percorso GPX';
+
+  const wpts = [...doc.querySelectorAll('wpt')];
+  const trkpts = [...doc.querySelectorAll('trkpt')];
+
+  const notes = wpts.map((w, i) => {
+    const lat = parseFloat(w.getAttribute('lat'));
+    const lon = parseFloat(w.getAttribute('lon'));
+    const n = w.querySelector('name')?.textContent || '';
+    const spd = w.querySelector('speed_kmh')?.textContent;
+    const gear = w.querySelector('gear')?.textContent;
+    const desc = w.querySelector('desc')?.textContent || '';
+    const kmMatch = n.match(/([\d.]+)km/);
+    return {
+      index: i,
+      km: kmMatch ? parseFloat(kmMatch[1]) : i * 0.5,
+      direction: n.replace(/^[\d.]+km · /, '') || desc.split('·')[0]?.trim() || 'Waypoint',
+      direction_cls: 'c-str',
+      speed_kmh: spd ? parseInt(spd) : null,
+      gear: gear ? parseInt(gear) : null,
+      note: desc.slice(0, 120),
+      coord: { lat, lon },
+      google_maps: `https://www.google.com/maps?q=${lat},${lon}`,
+    };
+  });
+
+  const track = trkpts.map(p => [parseFloat(p.getAttribute('lat')), parseFloat(p.getAttribute('lon'))]);
+
+  // Estimate distance from track
+  let dist = 0;
+  for (let i = 1; i < track.length; i++) {
+    dist += haversine(track[i-1][0], track[i-1][1], track[i][0], track[i][1]);
+  }
+
+  return {
+    meta: { app:'GPX Import', version:'—', ai_used:false, ai_speed_ratio:0, ai_gear_ratio:0 },
+    route: {
+      start: { name: name.split('→')[0]?.trim() || 'Partenza', coord: track[0] ? { lat:track[0][0], lon:track[0][1] } : null },
+      end:   { name: name.split('→')[1]?.trim() || 'Arrivo',   coord: track[track.length-1] ? { lat:track[track.length-1][0], lon:track[track.length-1][1] } : null },
+      waypoints: [],
+      distance_km: (dist/1000).toFixed(1),
+      time_estimated: '—',
+      google_maps_url: null,
+      _track: track,
+    },
+    vehicle: null,
+    driving_style: null,
+    statistics: null,
+    notes,
+  };
+}
+
+function haversine(lat1,lon1,lat2,lon2) {
+  const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD & RENDER ROUTE
+// ═══════════════════════════════════════════════════════════
+function loadRoute(data) {
+  showLoading('Rendering percorso...');
+  routeData = data;
+  setTimeout(() => {
+    try {
+      renderMap();
+      renderHeader();
+      renderNotesList();
+      renderStatsTab();
+      renderVehicleTab();
+      document.getElementById('dropScreen').classList.add('hide');
+      document.getElementById('tabsBar').classList.remove('hidden');
+      document.getElementById('routeHeader').classList.remove('hidden');
+      document.getElementById('notesToolbar').classList.remove('hidden');
+      document.getElementById('raceModeBtn').style.display = '';
+      // stats bar
+      const r = data.route;
+      document.getElementById('statDist').textContent = r.distance_km + ' km';
+      document.getElementById('statTime').textContent = r.time_estimated || '—';
+      document.getElementById('statNotes').textContent = data.notes?.length || '—';
+      switchTab('notes');
+      // Notifica moduli esterni (es. geo-start.js)
+      window.dispatchEvent(new CustomEvent('rallynav:routeloaded', { detail: data }));
+    } catch(err) {
+      console.error(err);
+      alert('Errore nel caricamento del percorso: ' + err.message);
+    } finally {
+      hideLoading();
+    }
+  }, 40);
+}
+
+// ─── MAP RENDER ───────────────────────────────────────────
+function renderMap() {
+  const d = routeData;
+
+  // Clear
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+  if (endMarker)   { map.removeLayer(endMarker);   endMarker = null; }
+  noteMarkers.forEach(m => map.removeLayer(m));
+  noteMarkers = [];
+
+  // Build polyline from notes coords or GPX track
+  let coords = [];
+  if (d.route._track && d.route._track.length > 1) {
+    coords = d.route._track;
+  } else if (d.notes && d.notes.length > 0) {
+    coords = d.notes
+      .filter(n => n.coord && n.coord.lat && n.coord.lon)
+      .map(n => [n.coord.lat, n.coord.lon]);
+  }
+
+  if (coords.length > 1) {
+    routeLayer = L.polyline(coords, { color:'#e8c230', weight:4, opacity:.85 }).addTo(map);
+  }
+
+  // Start / End markers
+  const makePin = (cls, label) => L.divIcon({
+    className:'', iconSize:[30,30], iconAnchor:[15,28], popupAnchor:[0,-28],
+    html:`<div class="pin-marker ${cls}"><span>${label}</span></div>`
+  });
+
+  const sc = d.route.start?.coord;
+  const ec = d.route.end?.coord;
+  if (sc) {
+    startMarker = L.marker([sc.lat, sc.lon], { icon:makePin('pin-start','▶') })
+      .bindPopup(`<b style="color:var(--green)">PARTENZA</b><br>${d.route.start.name}`)
+      .addTo(map);
+  }
+  if (ec) {
+    endMarker = L.marker([ec.lat, ec.lon], { icon:makePin('pin-end','⬛') })
+      .bindPopup(`<b style="color:var(--accent2)">ARRIVO</b><br>${d.route.end.name}`)
+      .addTo(map);
+  }
+
+  // Note markers
+  if (d.notes) {
+    d.notes.forEach((note, i) => {
+      if (!note.coord || !note.coord.lat) return;
+      const icon = L.divIcon({
+        className:'', iconSize:[20,20], iconAnchor:[10,10], popupAnchor:[0,-12],
+        html:`<div class="note-dot" id="nd-${i}" data-idx="${i}">${i+1 <= 99 ? i+1 : '•'}</div>`
+      });
+      const m = L.marker([note.coord.lat, note.coord.lon], { icon })
+        .addTo(map)
+        .on('click', () => focusNote(i, true));
+      noteMarkers.push(m);
+    });
+  }
+
+  // Fit bounds
+  if (routeLayer) {
+    map.fitBounds(routeLayer.getBounds(), { padding:[30, 30] });
+  } else if (sc) {
+    map.setView([sc.lat, sc.lon], 12);
+  }
+}
+
+// ─── HEADER ───────────────────────────────────────────────
+function renderHeader() {
+  const d = routeData;
+  const r = d.route;
+  document.getElementById('routeName').textContent = `${r.start.name} → ${r.end.name}`;
+
+  const meta = document.getElementById('routeMeta');
+  meta.innerHTML = '';
+
+  const ds = d.driving_style;
+  if (ds) {
+    const sb = document.createElement('span');
+    sb.className = 'badge badge-style';
+    sb.textContent = ds.style || '—';
+    meta.appendChild(sb);
+
+    const dn = (ds.difficulty || '').toLowerCase();
+    const db = document.createElement('span');
+    db.className = `badge badge-diff-${dn === 'facile'||dn==='easy' ? 'easy' : dn === 'difficile'||dn==='hard' ? 'hard' : 'medium'}`;
+    db.textContent = ds.difficulty || '—';
+    meta.appendChild(db);
+  }
+
+  const m = d.meta;
+  if (m?.ai_used) {
+    const ai = document.createElement('span');
+    ai.className = 'badge badge-ai';
+    ai.textContent = `🤖 AI ${m.ai_speed_ratio}%`;
+    meta.appendChild(ai);
+  }
+
+  const v = d.vehicle;
+  if (v) {
+    const vb = document.createElement('span');
+    vb.className = 'badge badge-car';
+    vb.textContent = `${v.icon||'🚗'} ${v.name}`;
+    meta.appendChild(vb);
+  }
+
+  if (r.waypoints?.length > 0) {
+    const wb = document.createElement('span');
+    wb.className = 'badge badge-car';
+    wb.textContent = `◆ ${r.waypoints.length} tapp${r.waypoints.length===1?'a':'e'}`;
+    meta.appendChild(wb);
+  }
+}
+
+// ─── NOTES LIST ───────────────────────────────────────────
+function renderNotesList() {
+  const list = document.getElementById('notesList');
+  list.innerHTML = '';
+  if (!routeData?.notes?.length) return;
+
+  const notes = routeData.notes;
+  let shown = 0;
+
+  notes.forEach((note, i) => {
+    if (!notePassesFilter(note)) return;
+    shown++;
+    list.appendChild(buildNoteItem(note, i));
+  });
+
+  document.getElementById('notesCountBadge').textContent = `${shown} di ${notes.length}`;
+
+  if (shown === 0) {
+    list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;">Nessuna nota corrisponde al filtro</div>';
+  }
+}
+
+function notePassesFilter(note) {
+  if (currentFilter === 'all') return true;
+  const dir = (note.direction || '').toLowerCase();
+  if (currentFilter === 'turns') {
+    return dir.includes('sinistra') || dir.includes('destra') || dir.includes('curva') ||
+           dir.includes('left') || dir.includes('right') || dir.includes('turn') ||
+           dir.includes('sx') || dir.includes('dx');
+  }
+  if (currentFilter === 'chicane') return note.is_chicane || false;
+  if (currentFilter === 'risk') {
+    const s = note.speed_kmh || 0;
+    const vmax = routeData?.vehicle?.vmax_kmh || 999;
+    return s > vmax * 0.8;
+  }
+  return true;
+}
+
+function buildNoteItem(note, i) {
+  const item = document.createElement('div');
+  item.className = 'note-item';
+  item.id = `ni-${i}`;
+  item.onclick = () => focusNote(i, false);
+
+  // km col
+  const km = note.km ?? 0;
+  const kmDiv = document.createElement('div');
+  kmDiv.className = 'note-km';
+  kmDiv.innerHTML = `<div class="note-km-val">${km < 10 ? km.toFixed(2) : km.toFixed(1)}</div><div class="note-km-unit">km</div>`;
+  item.appendChild(kmDiv);
+
+  // body
+  const body = document.createElement('div');
+  body.className = 'note-body';
+
+  // main row
+  const main = document.createElement('div');
+  main.className = 'note-main';
+
+  const dirCls = note.direction_cls || getTurnClass(note.direction || '');
+  const turnSpan = document.createElement('span');
+  turnSpan.className = `note-turn ${dirCls}`;
+  turnSpan.textContent = note.direction || '—';
+  main.appendChild(turnSpan);
+
+  const ang = note.turn_angle;
+  if (ang) {
+    const ab = document.createElement('span');
+    ab.className = `ang-badge ang-${Math.min(6, ang)}`;
+    ab.textContent = ang;
+    main.appendChild(ab);
+  }
+
+  if (note.speed_kmh != null) {
+    const spd = document.createElement('span');
+    spd.className = 'note-speed';
+    const vmax = routeData?.vehicle?.vmax_kmh;
+    const pct = vmax ? note.speed_kmh / vmax : 0;
+    spd.style.color = pct > 0.85 ? 'var(--red)' : pct > 0.6 ? 'var(--accent)' : 'var(--green)';
+    spd.textContent = note.speed_kmh + ' km/h';
+    main.appendChild(spd);
+  }
+
+  if (note.gear != null) {
+    const gr = document.createElement('span');
+    gr.className = 'note-gear';
+    gr.textContent = 'M' + note.gear;
+    main.appendChild(gr);
+  }
+
+  if (note.ai_speed || note.ai_gear) {
+    const ai = document.createElement('span');
+    ai.className = 'ai-chip';
+    ai.textContent = '🤖';
+    main.appendChild(ai);
+  }
+
+  body.appendChild(main);
+
+  // detail
+  const parts = [];
+  if (note.road_type_label) parts.push(note.road_type_label);
+  if (note.radius_m) parts.push(note.radius_m < 9999 ? `R${Math.round(note.radius_m)}m` : 'rettilineo');
+  if (note.grade_pct) parts.push(note.grade_pct > 0 ? `▲${note.grade_pct}%` : `▼${Math.abs(note.grade_pct)}%`);
+  if (note.brake_dist_m) parts.push(`⚡ fren. ${note.brake_dist_m}m`);
+
+  if (parts.length) {
+    const det = document.createElement('div');
+    det.className = 'note-detail';
+    det.textContent = parts.join(' · ');
+    body.appendChild(det);
+  }
+
+  // flags
+  const flags = [];
+  if (note.is_chicane) flags.push('⇄ CHICANE');
+  if (note.radius_label) flags.push(note.radius_label);
+  if (note.grade_label) flags.push(note.grade_label);
+  if (flags.length) {
+    const fl = document.createElement('div');
+    fl.className = 'note-flags';
+    fl.textContent = flags.join(' · ');
+    body.appendChild(fl);
+  }
+
+  // note text
+  if (note.note) {
+    const nt = document.createElement('div');
+    nt.className = 'note-note-text';
+    nt.textContent = note.note;
+    body.appendChild(nt);
+  }
+
+  item.appendChild(body);
+  return item;
+}
+
+function getTurnClass(dir) {
+  const d = dir.toLowerCase();
+  if (d.includes('sinistra')||d.includes('left')||d.includes('sx')) return 'c-left';
+  if (d.includes('destra')||d.includes('right')||d.includes('dx')) return 'c-right';
+  if (d.includes('round')||d.includes('rotator')) return 'c-round';
+  return 'c-str';
+}
+
+function applyFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  renderNotesList();
+}
+
+// ─── STATS TAB ────────────────────────────────────────────
+function renderStatsTab() {
+  const content = document.getElementById('statsContent');
+  content.innerHTML = '';
+  if (!routeData) return;
+  const d = routeData;
+  const s = d.statistics;
+  const r = d.route;
+
+  // Speed advisor
+  if (s?.speed) {
+    const sa = s.speed;
+    const vmax = d.vehicle?.vmax_kmh || 100;
+    const pct = Math.round(sa.avg / vmax * 100);
+    const barColor = pct > 85 ? 'var(--red)' : pct > 60 ? 'var(--accent)' : 'var(--green)';
+    const total = (sa.safe||0) + (sa.warn||0) + (sa.risk||0);
+    const saDiv = document.createElement('div');
+    saDiv.className = 'spd-advisor';
+    saDiv.innerHTML = `
+      <div class="section-title">Velocità percorso</div>
+      <div class="spd-row">
+        <div class="spd-bar-wrap"><div class="spd-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        <div class="spd-val" style="color:${barColor}">${sa.avg} km/h (${pct}%)</div>
+      </div>
+      <div class="spd-zones">
+        <span class="spz spz-safe">🟢 ${total ? Math.round((sa.safe||0)/total*100) : 0}% sicura</span>
+        <span class="spz spz-warn">🟡 ${total ? Math.round((sa.warn||0)/total*100) : 0}% sportiva</span>
+        <span class="spz spz-risk">🔴 ${total ? Math.round((sa.risk||0)/total*100) : 0}% limite</span>
+      </div>
+      <div class="kv-row" style="margin-top:8px">
+        <span class="kv-key">Min / Max</span>
+        <span class="kv-val">${sa.min} / ${sa.max} km/h</span>
+      </div>
+    `;
+    content.appendChild(saDiv);
+  }
+
+  // Route section
+  const routeDiv = document.createElement('div');
+  routeDiv.className = 'stats-section';
+  routeDiv.innerHTML = `<div class="section-title">Percorso</div>`;
+  const kv = [
+    ['Partenza', r.start?.name || '—'],
+    ...(r.waypoints?.map((w,i) => [`Tappa ${i+1}`, w.name || '—']) || []),
+    ['Arrivo', r.end?.name || '—'],
+    ['Distanza', r.distance_km + ' km'],
+    ['Tempo stimato', r.time_estimated || '—'],
+  ];
+  kv.forEach(([k, v]) => {
+    routeDiv.innerHTML += `<div class="kv-row"><span class="kv-key">${k}</span><span class="kv-val accent">${v}</span></div>`;
+  });
+
+  if (r.google_maps_url) {
+    routeDiv.innerHTML += `<div class="map-links" style="padding:0;margin-top:10px;flex-wrap:wrap;display:flex;gap:6px">
+      <a class="map-link" href="${r.google_maps_url}" target="_blank">🗺 Google Maps</a>
+      ${r.start?.coord ? `<a class="map-link" href="https://www.openstreetmap.org/?mlat=${r.start.coord.lat}&mlon=${r.start.coord.lon}&zoom=15" target="_blank">📍 OSM Partenza</a>` : ''}
+      ${r.end?.coord ? `<a class="map-link" href="https://www.openstreetmap.org/?mlat=${r.end.coord.lat}&mlon=${r.end.coord.lon}&zoom=15" target="_blank">🏁 OSM Arrivo</a>` : ''}
+    </div>`;
+  }
+  content.appendChild(routeDiv);
+
+  // Curvature
+  if (s?.curvature) {
+    const c = s.curvature;
+    const maxC = Math.max(c.hairpins||0, c.tight||0, c.medium||0, c.wide||0, 1);
+    const cDiv = document.createElement('div');
+    cDiv.className = 'stats-section';
+    cDiv.innerHTML = `<div class="section-title">Curvatura</div>`;
+    const rows = [
+      ['Tornanti (<60m)', c.hairpins||0, 'var(--red)'],
+      ['Curve strette', c.tight||0, '#ff8c00'],
+      ['Curve medie', c.medium||0, 'var(--accent)'],
+      ['Curve ampie', c.wide||0, 'var(--green)'],
+      ['Chicane', c.chicanes||0, 'var(--blue)'],
+    ];
+    const cFrag = document.createDocumentFragment();
+    rows.forEach(([label, cnt, col]) => {
+      const r = document.createElement('div');
+      r.className = 'mini-bar-row';
+      r.innerHTML = `<span class="mini-bar-label">${label}</span><div class="mini-bar-wrap"><div class="mini-bar-fill" style="width:${Math.round(cnt/maxC*100)}%;background:${col}"></div></div><span class="mini-bar-count">${cnt}</span>`;
+      cFrag.appendChild(r);
+    });
+    cDiv.appendChild(cFrag);
+    content.appendChild(cDiv);
+  }
+
+  // Gradient
+  if (s?.gradient) {
+    const g = s.gradient;
+    const gDiv = document.createElement('div');
+    gDiv.className = 'stats-section';
+    gDiv.innerHTML = `<div class="section-title">Pendenza</div>
+      <div class="kv-row"><span class="kv-key">▲ Tratti in salita</span><span class="kv-val green">${g.uphill||0}</span></div>
+      <div class="kv-row"><span class="kv-key">▼ Tratti in discesa</span><span class="kv-val blue">${g.downhill||0}</span></div>
+      <div class="kv-row"><span class="kv-key">⚠ Ripidi ≥7%</span><span class="kv-val red">${g.steep||0}</span></div>`;
+    content.appendChild(gDiv);
+  }
+
+  // Gear distribution
+  if (s?.gear_distribution && d.vehicle) {
+    const gd = s.gear_distribution;
+    const total = Object.values(gd).reduce((a,b)=>a+b,0) || 1;
+    const gdDiv = document.createElement('div');
+    gdDiv.className = 'stats-section';
+    gdDiv.innerHTML = `<div class="section-title">Distribuzione marce</div>`;
+    const gdFrag = document.createDocumentFragment();
+    Object.entries(gd).sort((a,b)=>parseInt(a[0])-parseInt(b[0])).forEach(([g, cnt]) => {
+      const pct = Math.round(cnt/total*100);
+      const gRow = document.createElement('div');
+      gRow.className = 'gear-bar-row';
+      gRow.innerHTML = `<span class="gear-label">M${g}</span><div class="gear-bar-wrap"><div class="gear-bar-fill" style="width:${pct}%"></div></div><span class="gear-pct">${pct}%</span>`;
+      gdFrag.appendChild(gRow);
+    });
+    gdDiv.appendChild(gdFrag);
+    content.appendChild(gdDiv);
+  }
+
+  // avg brake dist
+  if (s?.avg_brake_dist_m) {
+    const bDiv = document.createElement('div');
+    bDiv.className = 'stats-section';
+    bDiv.innerHTML = `<div class="section-title">Frenata</div>
+      <div class="kv-row"><span class="kv-key">Distanza frenata media</span><span class="kv-val accent">~${s.avg_brake_dist_m}m</span></div>`;
+    content.appendChild(bDiv);
+  }
+
+  // AI stats
+  const m = d.meta;
+  if (m) {
+    const aiDiv = document.createElement('div');
+    aiDiv.className = 'stats-section';
+    aiDiv.innerHTML = `<div class="section-title">Analisi AI</div>
+      <div class="kv-row"><span class="kv-key">AI velocità</span><span class="kv-val ${m.ai_used?'blue':''}"> ${m.ai_speed_ratio || 0}%</span></div>
+      <div class="kv-row"><span class="kv-key">AI marce</span><span class="kv-val ${m.ai_used?'blue':''}"> ${m.ai_gear_ratio || 0}%</span></div>
+      <div class="kv-row"><span class="kv-key">Versione app</span><span class="kv-val">${m.version||'—'}</span></div>
+      ${m.generated_at ? `<div class="kv-row"><span class="kv-key">Generato</span><span class="kv-val" style="font-size:10px">${new Date(m.generated_at).toLocaleString('it-IT')}</span></div>` : ''}
+    `;
+    content.appendChild(aiDiv);
+  }
+}
+
+// ─── VEHICLE TAB ──────────────────────────────────────────
+function renderVehicleTab() {
+  const content = document.getElementById('vehicleContent');
+  content.innerHTML = '';
+  if (!routeData?.vehicle) {
+    content.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;">Nessuna informazione veicolo disponibile in questo file.</div>';
+    return;
+  }
+  const v = routeData.vehicle;
+  const ds = routeData.driving_style;
+
+  const vDiv = document.createElement('div');
+  vDiv.className = 'stats-section';
+  vDiv.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <span style="font-size:36px">${v.icon||'🚗'}</span>
+      <div>
+        <div style="font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;color:var(--text)">${v.name||'—'}</div>
+        <div style="font-size:12px;color:var(--muted)">${v.preset_id||''}</div>
+      </div>
+    </div>
+    <div class="kv-row"><span class="kv-key">Trazione</span><span class="kv-val accent">${(v.drive||'—').toUpperCase()}</span></div>
+    <div class="kv-row"><span class="kv-key">Velocità max</span><span class="kv-val">${v.vmax_kmh||'—'} km/h</span></div>
+    <div class="kv-row"><span class="kv-key">Numero marce</span><span class="kv-val">${v.gears||'—'}</span></div>
+    <div class="kv-row"><span class="kv-key">Regime massimo</span><span class="kv-val">${v.rpm_max ? v.rpm_max.toLocaleString('it') : '—'} rpm</span></div>
+    <div class="kv-row"><span class="kv-key">Cambio consigliato</span><span class="kv-val">${v.rpm_shift ? v.rpm_shift.toLocaleString('it') : '—'} rpm</span></div>
+  `;
+  content.appendChild(vDiv);
+
+  if (ds) {
+    const dsDiv = document.createElement('div');
+    dsDiv.className = 'stats-section';
+    dsDiv.innerHTML = `
+      <div class="section-title">Stile di guida</div>
+      <div class="kv-row"><span class="kv-key">Stile</span><span class="kv-val accent">${ds.style||'—'}</span></div>
+      <div class="kv-row"><span class="kv-key">Descrizione</span><span class="kv-val" style="font-size:11px;text-align:right;max-width:180px">${ds.style_desc||'—'}</span></div>
+      <div class="kv-row"><span class="kv-key">Difficoltà</span><span class="kv-val">${ds.difficulty||'—'}</span></div>
+      <div class="kv-row"><span class="kv-key">Moltiplicatore velocità</span><span class="kv-val">×${ds.speed_mult||1}</span></div>
+    `;
+    content.appendChild(dsDiv);
+  }
+
+  // gear speed chart
+  if (v.vmax_kmh && v.gears && v.rpm_max && v.rpm_shift) {
+    const speeds = calcGearSpeeds(v);
+    const gcDiv = document.createElement('div');
+    gcDiv.className = 'stats-section';
+    gcDiv.innerHTML = `<div class="section-title">Velocità per marcia</div>`;
+    const gcFrag = document.createDocumentFragment();
+    speeds.forEach((s, i) => {
+      const pct = Math.round(s / v.vmax_kmh * 100);
+      const gRow = document.createElement('div');
+      gRow.className = 'gear-bar-row';
+      gRow.innerHTML = `<span class="gear-label">M${i+1}</span><div class="gear-bar-wrap"><div class="gear-bar-fill" style="width:${pct}%;background:var(--blue);opacity:.8"></div></div><span class="gear-pct">${s} km/h</span>`;
+      gcFrag.appendChild(gRow);
+    });
+    gcDiv.appendChild(gcFrag);
+    content.appendChild(gcDiv);
+  }
+}
+
+function calcGearSpeeds(v) {
+  const n = v.gears, vmax = v.vmax_kmh;
+  const rpmRatio = v.rpm_max > 0 ? v.rpm_shift / v.rpm_max : 0.85;
+  const speeds = [];
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const vTop = vmax * Math.pow(t, 0.80);
+    speeds.push(Math.round(vTop * rpmRatio / 5) * 5);
+  }
+  speeds[n-1] = vmax;
+  return speeds;
+}
+
+// ═══════════════════════════════════════════════════════════
+// FOCUS NOTE
+// ═══════════════════════════════════════════════════════════
+function focusNote(idx, fromMap) {
+  // Deactivate previous
+  if (activeNoteIdx != null) {
+    document.getElementById(`ni-${activeNoteIdx}`)?.classList.remove('active');
+    document.querySelector(`.note-dot[data-idx="${activeNoteIdx}"]`)?.classList.remove('active');
+  }
+
+  activeNoteIdx = idx;
+  const note = routeData?.notes?.[idx];
+  if (!note) return;
+
+  const el  = document.getElementById(`ni-${idx}`);
+  const dot = document.querySelector(`.note-dot[data-idx="${idx}"]`);
+  el?.classList.add('active');
+  dot?.classList.add('active');
+  if (!fromMap && el) el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+
+  // Pan map
+  if (note.coord?.lat && map) {
+    map.panTo([note.coord.lat, note.coord.lon], { animate:true });
+  }
+
+  // Show popup on map click
+  if (fromMap && note.coord) {
+    showNotePopup(note, idx);
+  }
+}
+
+function showNotePopup(note, idx) {
+  const popup = document.getElementById('notePopup');
+  const title = document.getElementById('ndpTitle');
+  const body = document.getElementById('ndpBody');
+
+  title.textContent = `#${idx+1} — ${note.direction || '—'} @ ${note.km?.toFixed(2)} km`;
+
+  const rows = [
+    ['Velocità', note.speed_kmh != null ? `${note.speed_kmh} km/h` : '—'],
+    ['Marcia', note.gear != null ? `M${note.gear}` : '—'],
+    ['RPM', note.rpm != null ? `${note.rpm.toLocaleString('it')} rpm` : '—'],
+    ['Tipo strada', note.road_type_label || note.road_type || '—'],
+    ['Raggio', note.radius_m ? (note.radius_m < 9999 ? `R${Math.round(note.radius_m)}m` : 'Rettilineo') : '—'],
+    ['Pendenza', note.grade_pct ? (note.grade_pct > 0 ? `▲ ${note.grade_pct}%` : `▼ ${Math.abs(note.grade_pct)}%`) : '—'],
+    ['Frenata', note.brake_dist_m ? `~${note.brake_dist_m}m` : '—'],
+    ['Chicane', note.is_chicane ? '⇄ Sì' : 'No'],
+    ['Distanza', note.distance_m ? `${Math.round(note.distance_m)}m` : '—'],
+  ];
+
+  body.innerHTML = rows.map(([k,v]) =>
+    `<div class="ndp-row"><span class="ndp-key">${k}</span><span class="ndp-val">${v}</span></div>`
+  ).join('');
+
+  if (note.note) {
+    body.innerHTML += `<div class="ndp-note">💬 ${note.note}</div>`;
+  }
+
+  // Links
+  if (note.coord?.lat || note.google_maps) {
+    const lat = note.coord?.lat, lon = note.coord?.lon;
+    body.innerHTML += `<div class="ndp-links">
+      ${note.google_maps ? `<a class="ndp-link" href="${note.google_maps}" target="_blank">📍 Google Maps</a>` : ''}
+      ${lat && lon ? `<a class="ndp-link" href="${note.osm_url || `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}&zoom=17`}" target="_blank">🗺 OSM</a>` : ''}
+    </div>`;
+  }
+
+  // Position popup near center/top
+  popup.style.display = 'block';
+  popup.style.top = '80px';
+  popup.style.left = '50%';
+  popup.style.transform = 'translateX(-50%)';
+}
+
+function closeNotePopup() {
+  document.getElementById('notePopup').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === `tab-${name}`));
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOADING
+// ═══════════════════════════════════════════════════════════
+function showLoading(msg) {
+  const lo = document.getElementById('loadingOverlay');
+  document.getElementById('loadingText').textContent = msg || 'Caricamento...';
+  lo.classList.add('show');
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('show');
+}
+
+// ═══════════════════════════════════════════════════════════
+// DEMO DATA
+// ═══════════════════════════════════════════════════════════
+
+
+// ═══════════════════════════════════════════════════════════
+// RACE MODE
+// ═══════════════════════════════════════════════════════════
+let raceIdx = 0;
+let raceNotes = [];
+let raceSwipeStartX = null;
+
+const TURN_ARROWS = {
+  'c-left':  '↰',
+  'c-right': '↱',
+  'c-str':   '⬆',
+  'c-round': '🔄',
+};
+
+function getTurnArrow(note) {
+  const cls = note.direction_cls || getTurnClass(note.direction || '');
+  const dir = (note.direction || '').toLowerCase();
+  if (dir.includes('tornante')) return cls.includes('left') ? '↩' : '↪';
+  if (dir.includes('chicane')) return '⇄';
+  return TURN_ARROWS[cls] || '⬆';
+}
+
+function getSpeedClass(speedKmh) {
+  if (!routeData?.vehicle?.vmax_kmh) return '';
+  const pct = speedKmh / routeData.vehicle.vmax_kmh;
+  return pct > 0.85 ? 'speed-risk' : pct > 0.6 ? 'speed-warn' : 'speed-safe';
+}
+
+function enterRaceMode() {
+  if (!routeData?.notes?.length) return;
+  raceNotes = routeData.notes;
+  raceIdx = activeNoteIdx != null ? activeNoteIdx : 0;
+  renderRaceNote();
+  document.getElementById('raceOverlay').classList.add('active');
+  document.body.style.overflow = 'hidden';
+
+  // Swipe support
+  const cur = document.getElementById('raceCurrent');
+  cur.addEventListener('touchstart', e => { raceSwipeStartX = e.touches[0].clientX; }, { passive:true });
+  cur.addEventListener('touchend', e => {
+    if (raceSwipeStartX === null) return;
+    const dx = e.changedTouches[0].clientX - raceSwipeStartX;
+    if (Math.abs(dx) > 50) dx < 0 ? raceNext() : racePrev();
+    raceSwipeStartX = null;
+  }, { passive:true });
+}
+
+function exitRaceMode() {
+  document.getElementById('raceOverlay').classList.remove('active');
+  document.body.style.overflow = '';
+  // Stop any ongoing speech
+  if (voiceSynth) { voiceSynth.cancel(); }
+  document.getElementById('voiceSpeakingWave').classList.remove('visible');
+  // Sync back to list
+  if (raceNotes[raceIdx]) focusNote(raceIdx, false);
+}
+
+function renderRaceNote() {
+  const note = raceNotes[raceIdx];
+  if (!note) return;
+  const total = raceNotes.length;
+
+  // Progress
+  document.getElementById('raceProgressFill').style.width = `${((raceIdx + 1) / total) * 100}%`;
+  document.getElementById('raceCounter').textContent = `${raceIdx + 1} / ${total}`;
+
+  // KM
+  document.getElementById('raceKm').textContent = `${note.km?.toFixed(2) ?? '—'} km`;
+
+  // Arrow icon
+  const arrow = getTurnArrow(note);
+  const arrowEl = document.getElementById('raceArrowIcon');
+  arrowEl.textContent = arrow;
+  const dirCls = note.direction_cls || getTurnClass(note.direction || '');
+  arrowEl.style.color = dirCls === 'c-left' ? 'var(--blue)'
+    : dirCls === 'c-right' ? 'var(--accent2)'
+    : dirCls === 'c-round' ? '#cc44ff'
+    : 'var(--green)';
+
+  // Direction
+  const dirEl = document.getElementById('raceDirection');
+  dirEl.textContent = note.direction || '—';
+  dirEl.className = `race-direction ${dirCls}`;
+
+  // Angle + road type
+  const angleRow = document.getElementById('raceAngleRow');
+  angleRow.innerHTML = '';
+  if (note.turn_angle) {
+    const ab = document.createElement('span');
+    ab.className = `race-ang-badge ang-${Math.min(6, note.turn_angle)}`;
+    ab.textContent = `CURVA ${note.turn_angle}`;
+    angleRow.appendChild(ab);
+  }
+  if (note.radius_m && note.radius_m < 9999) {
+    const rb = document.createElement('span');
+    rb.className = 'race-ang-badge';
+    rb.classList.add('race-ang-badge-muted');
+    rb.textContent = `R ${Math.round(note.radius_m)}m`;
+    angleRow.appendChild(rb);
+  }
+  if (note.road_type_label) {
+    const rtb = document.createElement('span');
+    rtb.className = 'race-ang-badge';
+    rtb.classList.add('race-ang-badge-muted', 'race-ang-badge-sm');
+    rtb.textContent = note.road_type_label;
+    angleRow.appendChild(rtb);
+  }
+
+  // Speed
+  const spdEl = document.getElementById('raceSpeed');
+  const spdCls = note.speed_kmh != null ? getSpeedClass(note.speed_kmh) : '';
+  spdEl.innerHTML = note.speed_kmh != null
+    ? `<span class="${spdCls}">${note.speed_kmh}</span><span class="race-speed-unit">km/h</span>`
+    : `<span style="color:var(--muted)">—</span>`;
+
+  // Gear
+  const gearEl = document.getElementById('raceGear');
+  gearEl.textContent = note.gear != null ? `M${note.gear}` : '—';
+
+  // RPM
+  const rpmEl = document.getElementById('raceRpm');
+  if (note.rpm) {
+    const pct = note.rpm_pct ? Math.round(note.rpm_pct * 100) : '';
+    rpmEl.textContent = `${note.rpm.toLocaleString('it')} rpm${pct ? ` (${pct}%)` : ''}`;
+  } else {
+    rpmEl.textContent = '';
+  }
+
+  // Flags
+  const flagsEl = document.getElementById('raceFlags');
+  flagsEl.innerHTML = '';
+  if (note.is_chicane) { const f=document.createElement('span'); f.className='race-flag chicane'; f.textContent='⇄ CHICANE'; flagsEl.appendChild(f); }
+  if (note.brake_dist_m) { const f=document.createElement('span'); f.className='race-flag brake'; f.textContent=`⚡ Frena a ${note.brake_dist_m}m`; flagsEl.appendChild(f); }
+  if (note.grade_pct > 2) { const f=document.createElement('span'); f.className='race-flag uphill'; f.textContent=`▲ Salita ${note.grade_pct}%`; flagsEl.appendChild(f); }
+  if (note.grade_pct < -2) { const f=document.createElement('span'); f.className='race-flag downhill'; f.textContent=`▼ Discesa ${Math.abs(note.grade_pct)}%`; flagsEl.appendChild(f); }
+  if (note.next_gear_at_kmh) { const f=document.createElement('span'); f.className='race-flag'; f.classList.add('race-flag-nextgear'); f.textContent=`↑ M${(note.gear||0)+1} a ${note.next_gear_at_kmh}km/h`; flagsEl.appendChild(f); }
+
+  // Note text
+  document.getElementById('raceNoteText').textContent = note.note || '';
+
+  // Next preview
+  const next = raceNotes[raceIdx + 1];
+  const nextBar = document.getElementById('raceNextBar');
+  if (next) {
+    nextBar.style.display = '';
+    document.getElementById('raceNextIcon').textContent = getTurnArrow(next);
+    const ndirEl = document.getElementById('raceNextDir');
+    ndirEl.textContent = next.direction || '—';
+    ndirEl.className = `race-next-dir ${next.direction_cls || getTurnClass(next.direction||'')}`;
+    document.getElementById('raceNextSpd').textContent = next.speed_kmh != null ? `${next.speed_kmh} km/h` : '';
+    document.getElementById('raceNextGear').textContent = next.gear != null ? `M${next.gear}` : '';
+  } else {
+    nextBar.style.display = 'none';
+  }
+
+  // Nav buttons
+  document.getElementById('racePrevBtn').disabled = raceIdx === 0;
+  document.getElementById('raceNextBtn').disabled = raceIdx === total - 1;
+
+  // Pan map (background)
+  if (note.coord?.lat && map) map.panTo([note.coord.lat, note.coord.lon], { animate:true });
+
+  // Pulse animation on arrow
+  arrowEl.style.transform = 'scale(1.1)';
+  setTimeout(() => { arrowEl.style.transform = 'scale(1)'; }, 120);
+}
+
+function raceNext() {
+  if (raceIdx < raceNotes.length - 1) { raceIdx++; renderRaceNote(); speakCurrentNote(); }
+}
+function racePrev() {
+  if (raceIdx > 0) { raceIdx--; renderRaceNote(); speakCurrentNote(); }
+}
+
+function handleRaceKey(e) {
+  if (e.key === 'Escape' && document.getElementById('apikeyModal').classList.contains('show')) {
+    closeApikeyModal(); return;
+  }
+  if (!document.getElementById('raceOverlay').classList.contains('active')) return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); raceNext(); }
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); racePrev(); }
+  if (e.key === 'Escape') exitRaceMode();
+}
+document.addEventListener('keydown', handleRaceKey);
+
+// ═══════════════════════════════════════════════════════════
+// VOICE COPILOT — Google Cloud WaveNet TTS
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * ARCHITETTURA:
+ *  - Chiave API Google Cloud (Cloud Text-to-Speech API abilitata).
+ *  - Endpoint: POST https://texttospeech.googleapis.com/v1/text:synthesize
+ *  - Risposta: MP3 in base64 → riprodotto direttamente via Audio().
+ *  - Voce: it-IT-Wavenet-D (maschile, profondo) — ottima per italiano.
+ *  - La velocità viene applicata tramite AudioContext.playbackRate.
+ *  - Fallback automatico al browser Speech Synthesis se l'API non risponde.
+ */
+
+const WAVENET_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
+
+// Impostazioni modificabili dall'utente
+let wavenetVoice = 'it-IT-Wavenet-D';
+let wavenetSpeed = 1.35;   // più veloce di default (1.0 = normale)
+
+let googleApiKey  = '';
+let currentAudio  = null;
+
+// Carica impostazioni salvate
+(function loadSavedSettings() {
+  try {
+    const key   = localStorage.getItem('rallyNav_googleTtsKey');
+    const voice = localStorage.getItem('rallyNav_voice');
+    const speed = localStorage.getItem('rallyNav_speed');
+    if (key)   googleApiKey  = key;
+    if (voice) wavenetVoice  = voice;
+    if (speed) wavenetSpeed  = parseFloat(speed);
+  } catch(e) {}
+})();
+
+/* ── PANNELLO IMPOSTAZIONI ──────────────────────────────── */
+
+function openApikeyModal() {
+  // Popola i campi con i valori attuali
+  document.getElementById('apikeyInput').value = googleApiKey || '';
+  document.getElementById('apikeyInput').type  = 'password';
+  document.getElementById('apikeyRemember').checked = !!localStorage.getItem('rallyNav_googleTtsKey');
+
+  const voiceSel = document.getElementById('voiceSelect');
+  voiceSel.value = wavenetVoice;
+
+  const speedRange = document.getElementById('voiceSpeedRange');
+  speedRange.value = wavenetSpeed;
+  document.getElementById('voiceSpeedLabel').textContent = wavenetSpeed.toFixed(2) + '×';
+
+  // Live preview velocità
+  speedRange.oninput = () => {
+    const v = parseFloat(speedRange.value);
+    document.getElementById('voiceSpeedLabel').textContent = v.toFixed(2) + '×';
+  };
+
+  document.getElementById('apikeyModal').classList.add('show');
+  setTimeout(() => document.getElementById('apikeyInput').focus(), 120);
+}
+
+function closeApikeyModal() {
+  document.getElementById('apikeyModal').classList.remove('show');
+}
+
+function toggleShowKey() {
+  const inp = document.getElementById('apikeyInput');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function deleteApiKey() {
+  googleApiKey = '';
+  try { localStorage.removeItem('rallyNav_googleTtsKey'); } catch(e) {}
+  document.getElementById('apikeyInput').value = '';
+  showVoiceToast('🗑 Chiave cancellata', true);
+  voiceCopilotEnabled = false;
+  stopAudio();
+  updateVoiceBtn();
+  closeApikeyModal();
+}
+
+function saveApiKey() {
+  const key   = document.getElementById('apikeyInput').value.trim();
+  const voice = document.getElementById('voiceSelect').value;
+  const speed = parseFloat(document.getElementById('voiceSpeedRange').value);
+
+  if (!key) { showVoiceToast('⚠ Inserisci una chiave valida', true); return; }
+
+  googleApiKey  = key;
+  wavenetVoice  = voice;
+  wavenetSpeed  = speed;
+
+  try {
+    if (document.getElementById('apikeyRemember').checked) {
+      localStorage.setItem('rallyNav_googleTtsKey', key);
+    } else {
+      localStorage.removeItem('rallyNav_googleTtsKey');
+    }
+    localStorage.setItem('rallyNav_voice', voice);
+    localStorage.setItem('rallyNav_speed', speed);
+  } catch(e) {}
+
+  closeApikeyModal();
+  voiceCopilotEnabled = true;
+  updateVoiceBtn();
+  showVoiceToast('🎙️ Copilota WaveNet TTS ATTIVATO');
+  speakCurrentNote();
+}
+
+// Escape gestito in handleRaceKey
+
+/* ── UI HELPERS ─────────────────────────────────────────── */
+
+function showVoiceToast(msg, isOff = false) {
+  const t = document.getElementById('voiceToast');
+  t.textContent = msg;
+  t.className = 'voice-toast show' + (isOff ? ' off' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = 'voice-toast' + (isOff ? ' off' : ''); }, 2800);
+}
+
+function updateVoiceBtn() {
+  const btn = document.getElementById('voiceCopilotBtn');
+  const lbl = document.getElementById('voiceBtnLabel');
+  if (voiceCopilotEnabled) {
+    btn.classList.add('active');
+    lbl.textContent = 'VOCE ON';
+    btn.title = 'Copilota WaveNet TTS ATTIVO — tieni premuto per cambiare chiave · clic per disattivare';
+  } else {
+    btn.classList.remove('active');
+    lbl.textContent = 'VOCE OFF';
+    btn.title = 'Attiva il copilota vocale Google WaveNet TTS';
+  }
+}
+
+function setSpeakingWave(visible) {
+  const el = document.getElementById('voiceSpeakingWave');
+  if (el) el.classList.toggle('visible', visible);
+}
+
+/* ── TOGGLE PRINCIPALE ──────────────────────────────────── */
+
+/**
+ * Clic sul pulsante 🎙️:
+ *  - Se disattivo e nessuna chiave → apre il modal per inserirla.
+ *  - Se disattivo e chiave presente → attiva direttamente.
+ *  - Se attivo → disattiva e ferma l'audio.
+ * Tasto lungo (> 600ms) → riapre il modal per cambiare/cancellare la chiave.
+ */
+let voiceBtnPressTimer = null;
+
+document.getElementById('voiceCopilotBtn').addEventListener('pointerdown', () => {
+  voiceBtnPressTimer = setTimeout(() => {
+    voiceBtnPressTimer = null;
+    // Pressione lunga: gestione chiave
+    openApikeyModal();
+  }, 650);
+});
+
+document.getElementById('voiceCopilotBtn').addEventListener('pointerup', () => {
+  if (!voiceBtnPressTimer) return; // era pressione lunga, già gestita
+  clearTimeout(voiceBtnPressTimer);
+  voiceBtnPressTimer = null;
+  toggleVoiceCopilot();
+});
+
+document.getElementById('voiceCopilotBtn').addEventListener('pointerleave', () => {
+  clearTimeout(voiceBtnPressTimer);
+  voiceBtnPressTimer = null;
+});
+
+function toggleVoiceCopilot() {
+  if (voiceCopilotEnabled) {
+    voiceCopilotEnabled = false;
+    stopAudio();
+    updateVoiceBtn();
+    showVoiceToast('🔇 Copilota vocale DISATTIVATO', true);
+  } else {
+    if (!googleApiKey) {
+      openApikeyModal();   // nessuna chiave → apre impostazioni
+    } else {
+      voiceCopilotEnabled = true;
+      updateVoiceBtn();
+      showVoiceToast('🎙️ Copilota WaveNet TTS ATTIVATO');
+      speakCurrentNote();
+    }
+  }
+}
+
+/* ── STOP AUDIO ─────────────────────────────────────────── */
+
+function stopAudio() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.src = '';
+    currentAudio = null;
+  }
+  if (voiceSynth) voiceSynth.cancel();
+  setSpeakingWave(false);
+}
+
+/* ── COSTRUZIONE TESTO PARLATO ──────────────────────────── */
+
+/**
+ * Testo compatto per il rally: curva → velocità/marcia curva → velocità/marcia tratto.
+ * Esempio: "Sinistra 3 — 65, marcia 3 — tratto 110, marcia 5"
+ * Avvisi critici (chicane, frenata) vengono anteposti se presenti.
+ */
+function buildSpeechText(note) {
+  if (!note) return '';
+
+  // Nomi ordinali marce (più naturali in italiano parlato)
+  const GEAR_NAMES = ['', 'prima', 'seconda', 'terza', 'quarta', 'quinta', 'sesta', 'settima'];
+  const gearName = g => GEAR_NAMES[g] || String(g);
+
+  // Angolo curva → etichetta breve da pacenote WRC (1=larga … 6=tornante)
+  // Se direction contiene già il numero (es. "Sinistra 3") non ripetiamo la label
+  const ANGLE_LABELS = ['', 'uno', 'due', 'tre', 'quattro', 'cinque', 'sei'];
+  const dir = (note.direction || '').trim();
+  const ang = note.turn_angle;
+
+  // Determina se direction include già il numero angolo → no ridondanza
+  const dirHasAngle = ang && new RegExp(`\\b${ang}\\b`).test(dir);
+
+  const parts = [];
+
+  // 1. Chicane — avviso immediato prima di tutto
+  if (note.is_chicane) parts.push('chicane');
+
+  // 2. Direzione + angolo (stile copilota: "sinistra tre", "tornante destra")
+  if (dir) {
+    if (ang && !dirHasAngle) {
+      // Normalizza direzione (rimuove eventuale numero finale) e appende angolo verbale
+      const cleanDir = dir.replace(/\s+\d+$/, '');
+      parts.push(`${cleanDir} ${ANGLE_LABELS[Math.min(ang, 6)] || ang}`);
+    } else {
+      parts.push(dir);
+    }
+  }
+
+  // 3. Velocità in curva — solo il numero, breve
+  if (note.speed_kmh != null) parts.push(String(note.speed_kmh));
+
+  // 4. Marcia — solo se diversa da quella che ci si aspetterebbe (sempre utile in rally)
+  if (note.gear != null) parts.push(gearName(note.gear));
+
+  // 5. Avviso frenata — dopo la curva, il pilota deve sentirlo subito dopo la direzione
+  if (note.brake_dist_m) parts.push(`frena`);
+
+  // 6. Pendenza solo se significativa (≥5% per non essere rumore)
+  if (note.grade_pct >= 5)       parts.push('salita');
+  else if (note.grade_pct <= -5) parts.push('discesa');
+
+  // Separatore breve: virgola per fluidità TTS italiana, non trattino
+  return parts.join(', ');
+}
+
+/* ── CHIAMATA GOOGLE WAVENET TTS ─────────────────────────── */
+
+/**
+ * Converte PCM L16 raw (little-endian, 16-bit, mono) in un ArrayBuffer WAV
+ * completo di header, direttamente nel browser senza librerie esterne.
+ */
+/**
+ * Chiama Google Cloud WaveNet TTS e restituisce un URL audio MP3 riproducibile.
+ */
+async function speakWithWaveNetTTS(text) {
+  const body = {
+    input: { text },
+    voice: {
+      languageCode: 'it-IT',
+      name: wavenetVoice
+    },
+    audioConfig: {
+      audioEncoding: 'MP3',
+      speakingRate: 1.0   // La velocità viene applicata via playbackRate dopo
+    }
+  };
+
+  const resp = await fetch(`${WAVENET_TTS_URL}?key=${googleApiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    const msg = err?.error?.message || `HTTP ${resp.status}`;
+    if (resp.status === 400 || resp.status === 401 || resp.status === 403) {
+      showVoiceToast('⚠ Chiave API non valida — tieni premuto 🎙️ per cambiarla', true);
+      voiceCopilotEnabled = false;
+      updateVoiceBtn();
+    } else {
+      showVoiceToast(`⚠ WaveNet TTS errore: ${msg}`, true);
+    }
+    throw new Error(msg);
+  }
+
+  const data    = await resp.json();
+  const mp3B64  = data?.audioContent;
+  if (!mp3B64) throw new Error('Nessun audio nella risposta WaveNet');
+
+  return { url: `data:audio/mp3;base64,${mp3B64}` };
+}
+
+/* ── RIPRODUZIONE AUDIO ─────────────────────────────────── */
+
+async function speakCurrentNote() {
+  if (!voiceCopilotEnabled) return;
+
+  stopAudio();
+
+  const note = raceNotes[raceIdx];
+  if (!note) return;
+  const text = buildSpeechText(note);
+  if (!text) return;
+
+  if (!googleApiKey) { speakFallback(text); return; }
+
+  setSpeakingWave(true);
+
+  try {
+    const { url } = await speakWithWaveNetTTS(text);
+    if (!voiceCopilotEnabled) {
+      setSpeakingWave(false);
+      return;
+    }
+    const audio = new Audio(url);
+    audio.playbackRate = wavenetSpeed;   // velocità impostata dall'utente
+    currentAudio = audio;
+    audio.onended = () => {
+      setSpeakingWave(false);
+      currentAudio = null;
+    };
+    audio.onerror = () => {
+      setSpeakingWave(false);
+      currentAudio = null;
+    };
+    await audio.play();
+  } catch (e) {
+    setSpeakingWave(false);
+    console.warn('WaveNet TTS error, fallback al browser:', e);
+    speakFallback(buildSpeechText(raceNotes[raceIdx]));
+  }
+}
+
+/* ── FALLBACK BROWSER SPEECH ─────────────────────────────── */
+
+function speakFallback(text) {
+  if (!voiceSynth) return;
+  voiceSynth.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'it-IT'; utter.rate = 1.0; utter.pitch = 1.0; utter.volume = 1.0;
+  const voices = voiceSynth.getVoices();
+  const itVoice = voices.find(v => v.lang.startsWith('it') && v.localService)
+               || voices.find(v => v.lang.startsWith('it'));
+  if (itVoice) utter.voice = itVoice;
+  utter.onstart = () => setSpeakingWave(true);
+  utter.onend = utter.onerror = () => setSpeakingWave(false);
+  voiceCurrentUtterance = utter;
+  voiceSynth.speak(utter);
+}
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+initMap();
+initDragDrop();
+document.addEventListener('click', e => {
+  if (!document.getElementById('notePopup').contains(e.target) && !e.target.closest('.note-dot'))
+    closeNotePopup();
+});
+</script>
+<!-- ═══ Geo Start — prossimità al punto di partenza ═══ -->
+<script src="Geolocalizzazione4.js"></script>
+
+<!-- ═══ Service Worker — aggiungi questo script alla fine del <body> ═══ -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('[RallyNav] SW registrato:', reg.scope))
+        .catch(err => console.warn('[RallyNav] SW fallito:', err));
+    });
+  }
+</script>
+</body>
+</html>
