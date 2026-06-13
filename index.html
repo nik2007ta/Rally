@@ -753,6 +753,12 @@ body { background:var(--bg); color:var(--text); font-family:'Barlow Condensed',s
 // STATE
 // ═══════════════════════════════════════════════════════════
 let routeData = null;
+// Espone routeData su window per il modulo geo-start.js (banner partenza)
+Object.defineProperty(window, 'routeData', {
+  get() { return routeData; },
+  set(v) { routeData = v; },
+  configurable: true,
+});
 let map = null;
 let routeLayer = null;
 let noteMarkers = [];
@@ -1584,6 +1590,18 @@ function hideLoading() {
 // ═══════════════════════════════════════════════════════════
 let raceIdx = 0;
 let raceNotes = [];
+
+// Espone le variabili race su window così il modulo geo-start.js può leggerle
+Object.defineProperty(window, 'raceIdx', {
+  get() { return raceIdx; },
+  set(v) { raceIdx = v; },
+  configurable: true,
+});
+Object.defineProperty(window, 'raceNotes', {
+  get() { return raceNotes; },
+  set(v) { raceNotes = v; },
+  configurable: true,
+});
 let raceSwipeStartX = null;
 
 const TURN_ARROWS = {
